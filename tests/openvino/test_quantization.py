@@ -2528,6 +2528,40 @@ class OVQuantizationConfigTest(unittest.TestCase):
 
     @parameterized.expand(
         [
+            ("int1_balanced", 1),
+            ("int2_balanced", 2),
+        ]
+    )
+    def test_balanced_weight_formats(self, dtype: str, bits: int):
+        """
+        The balanced formats reach NNCF as their own modes, not as an integer width plus a sign, and the group size
+        and `all_layers` are passed through, so an already-grouped checkpoint (group size 128) can be reproduced.
+        """
+        config = OVWeightQuantizationConfig(dtype=dtype, group_size=128, all_layers=True)
+        nncf_dict = config.to_nncf_dict()
+
+        self.assertEqual(config.bits, bits)
+        self.assertEqual(nncf_dict["mode"], nncf.CompressWeightsMode(dtype))
+        self.assertEqual(nncf_dict["group_size"], 128)
+        self.assertEqual(nncf_dict["all_layers"], True)
+        self.assertEqual(nncf_dict["ratio"], 1.0)
+
+    @parameterized.expand([("int1_balanced",), ("int2_balanced",)])
+    def test_balanced_weight_formats_reject_data_aware_algorithms(self, dtype: str):
+        """
+        The balanced formats are data-free: they recover the scale of weights that are already binary or ternary.
+        """
+        for kwargs in (
+            {"quant_method": OVQuantizationMethod.AWQ},
+            {"scale_estimation": True},
+            {"gptq": True},
+            {"lora_correction": True},
+        ):
+            with self.assertRaises(ValueError):
+                OVWeightQuantizationConfig(dtype=dtype, **kwargs)
+
+    @parameterized.expand(
+        [
             ("nncf.compress_weights", "_weight_only_quantization", "dataset", OVWeightQuantizationConfig),
             ("nncf.quantize", "_full_quantization", "calibration_dataset", OVQuantizationConfig),
         ]

@@ -626,6 +626,26 @@ _DEFAULT_2BIT_WQ_CONFIG = {
 }
 
 
+_DEFAULT_1BIT_BALANCED_WQ_CONFIG = {
+    "bits": 1,
+    "dtype": "int1_balanced",
+    "ratio": 1.0,
+    "group_size": 128,
+    "all_layers": None,
+    "group_size_fallback": "ignore",
+}
+
+
+_DEFAULT_2BIT_BALANCED_WQ_CONFIG = {
+    "bits": 2,
+    "dtype": "int2_balanced",
+    "ratio": 1.0,
+    "group_size": 128,
+    "all_layers": None,
+    "group_size_fallback": "ignore",
+}
+
+
 _DEFAULT_3BIT_WQ_CONFIG = {
     "bits": 3,
     "ratio": 1.0,
@@ -1229,8 +1249,8 @@ class OVWeightQuantizationConfig(OVQuantizationConfigBase):
                 "quantization algorithm is selected and compression ratio is 1.0."
             )
 
-        if self.dtype in ["int2", "int3", "int4", "int8"]:
-            bits = {"int2": 2, "int3": 3, "int4": 4, "int8": 8}[self.dtype]
+        if self.dtype in ["int2", "int3", "int4", "int8", "int1_balanced", "int2_balanced"]:
+            bits = {"int1_balanced": 1, "int2_balanced": 2, "int2": 2, "int3": 3, "int4": 4, "int8": 8}[self.dtype]
 
             if self.bits is not None and self.bits != bits:
                 logger.warning(
@@ -1238,8 +1258,8 @@ class OVWeightQuantizationConfig(OVQuantizationConfigBase):
                 )
             self.bits = bits
 
-        if self.bits not in [2, 3, 4, 8]:
-            raise ValueError(f"Only support quantization to [4,8] bits but found {self.bits}")
+        if self.bits not in [1, 2, 3, 4, 8]:
+            raise ValueError(f"Only support quantization to [1,2,3,4,8] bits but found {self.bits}")
 
         if self.bits == 8 and self.dtype:
             if self.ratio != 1:
@@ -1288,12 +1308,12 @@ class OVWeightQuantizationConfig(OVQuantizationConfigBase):
             raise ValueError(f"Processor is expected to be a string, but found {self.processor}")
 
         if self.dtype is None:
-            self.dtype = {2: "int2", 3: "int3", 4: "int4", 8: "int8"}[self.bits]
+            self.dtype = {1: "int1_balanced", 2: "int2", 3: "int3", 4: "int4", 8: "int8"}[self.bits]
 
-        if self.dtype not in ["int2", "int3", "int4", "int8", "mxfp4", "nf4", "cb4"]:
+        if self.dtype not in ["int2", "int3", "int4", "int8", "mxfp4", "nf4", "cb4", "int1_balanced", "int2_balanced"]:
             raise ValueError(
                 "Weights quantization data type must be one of the following: "
-                f"['int2', 'int3', 'int4', 'int8', 'mxfp4', 'nf4', 'cb4'], but found: {self.dtype}."
+                f"['int2', 'int3', 'int4', 'int8', 'mxfp4', 'nf4', 'cb4', 'int1_balanced', 'int2_balanced'], but found: {self.dtype}."
             )
         if self.dtype in ["mxfp4", "nf4", "cb4"]:
             if self.bits != 4:
@@ -1309,6 +1329,18 @@ class OVWeightQuantizationConfig(OVQuantizationConfigBase):
                     raise ValueError("The GPTQ algorithm is not supported for 'mxfp4' data type")
                 if self.lora_correction:
                     raise ValueError("The LoRA Correction algorithm is not supported for 'mxfp4' data type")
+        if self.dtype in ["int1_balanced", "int2_balanced"]:
+            # The balanced formats are data-free: they recover the scale of weights that are already binary or
+            # ternary, so there is nothing for a data-aware algorithm to fit.
+            if self.quant_method == OVQuantizationMethod.AWQ:
+                raise ValueError(f"The AWQ algorithm is not supported for '{self.dtype}' data type")
+            if self.scale_estimation:
+                raise ValueError(f"The Scale Estimation algorithm is not supported for '{self.dtype}' data type")
+            if self.gptq:
+                raise ValueError(f"The GPTQ algorithm is not supported for '{self.dtype}' data type")
+            if self.lora_correction:
+                raise ValueError(f"The LoRA Correction algorithm is not supported for '{self.dtype}' data type")
+
         if self.gptq and self.lora_correction:
             raise ValueError("The GPTQ and LoRA Correction algorithms can't be applied simultaneously")
 

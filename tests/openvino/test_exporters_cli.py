@@ -14,6 +14,7 @@
 import json
 import subprocess
 import unittest
+from collections import Counter
 from pathlib import Path
 from typing import Dict
 from unittest.mock import Mock
@@ -1324,6 +1325,37 @@ class OVCLIExportTestCase(unittest.TestCase):
             self.assertTrue("--gptq" not in option or b"Applying GPTQ" in result.stdout)
             self.assertTrue(
                 "--lora-correction" not in option or b"with correction of low-rank adapters" in result.stdout
+            )
+
+    @parameterized.expand(
+        [
+            ("int1_balanced", {"u1": 16, "f16": 32}),
+            ("int2_balanced", {"u2": 16, "u4": 16, "f16": 16}),
+        ]
+    )
+    def test_exporters_cli_balanced_weight_formats(self, weight_format: str, expected_num_weight_nodes: Dict[str, int]):
+        """
+        The balanced formats are exported as packed `u1`/`u2` weights with the dequantization subgraph the runtime
+        recognizes: a `u4` zero point behind a `Convert` for `int2_balanced`, an f16 zero point of 1/2 for
+        `int1_balanced` (no integer type holds 1/2) and an f16 scale for both.
+        """
+        import openvino as ov
+
+        with TemporaryDirectory() as tmpdir:
+            subprocess.run(
+                f"optimum-cli export openvino --model {MODEL_NAMES['llama']} --task text-generation-with-past "
+                f"--weight-format {weight_format} --group-size 16 --ratio 1.0 --all-layers {tmpdir}",
+                shell=True,
+                check=True,
+                capture_output=True,
+            )
+            model = ov.Core().read_model(Path(tmpdir) / "openvino_model.xml")
+            num_consts = Counter(
+                op.get_element_type().get_type_name() for op in model.get_ops() if op.get_type_name() == "Constant"
+            )
+            self.assertEqual(
+                expected_num_weight_nodes,
+                {type_name: num_consts[type_name] for type_name in expected_num_weight_nodes},
             )
 
     def test_exporters_cli_4bit_with_statistics_path(self):

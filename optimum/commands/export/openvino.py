@@ -67,10 +67,12 @@ def parse_args_openvino(parser: "ArgumentParser"):
     optional_group.add_argument(
         "--weight-format",
         type=str,
-        choices=["fp32", "fp16", "int8", "int4", "mxfp4", "nf4", "cb4", "int3", "int2"],
+        choices=["fp32", "fp16", "int8", "int4", "mxfp4", "nf4", "cb4", "int3", "int2", "int1_balanced", "int2_balanced"],
         default=None,
         help=(
-            "The weight format of the exported model. Option 'cb4' represents a codebook with 16 fixed fp8 values in E4M3 format."
+            "The weight format of the exported model. Option 'cb4' represents a codebook with 16 fixed fp8 values in E4M3 format. "
+            "Options 'int1_balanced' and 'int2_balanced' are data-free formats with a balanced grid, which are exact for "
+            "checkpoints whose weights already take two or three values per group."
         ),
     )
     optional_group.add_argument(
@@ -344,6 +346,8 @@ class OVExportCommand(BaseOptimumCLICommand):
     def run(self):
         from ...exporters.openvino.__main__ import _main_quantize, _merge_move, main_export
         from ...intel.openvino.configuration import (
+            _DEFAULT_1BIT_BALANCED_WQ_CONFIG,
+            _DEFAULT_2BIT_BALANCED_WQ_CONFIG,
             _DEFAULT_2BIT_WQ_CONFIG,
             _DEFAULT_3BIT_WQ_CONFIG,
             _DEFAULT_4BIT_WQ_CONFIG,
@@ -420,6 +424,19 @@ class OVExportCommand(BaseOptimumCLICommand):
                         logger.info(f"Applying a default quantization config: {quantization_config}.")
                     if self.args.quantization_statistics_path is not None:
                         quantization_config["statistics_path"] = self.args.quantization_statistics_path
+                elif no_compression_parameter_provided(self.args) and self.args.weight_format in [
+                    "int1_balanced",
+                    "int2_balanced",
+                ]:
+                    # The balanced formats recover the scale of weights that are already binary or ternary, so the
+                    # group size has to match the checkpoint's own grouping (128 in the published models) instead of
+                    # the int4 default.
+                    quantization_config = {
+                        "int1_balanced": _DEFAULT_1BIT_BALANCED_WQ_CONFIG,
+                        "int2_balanced": _DEFAULT_2BIT_BALANCED_WQ_CONFIG,
+                    }[self.args.weight_format]
+
+                    logger.info(f"Applying a default quantization config: {quantization_config}.")
             else:
                 if no_quantization_parameter_provided(self.args) and default_quantization_config is not None:
                     quantization_config = default_quantization_config
@@ -518,9 +535,12 @@ class OVExportCommand(BaseOptimumCLICommand):
 def prepare_wc_config(args, default_configs):
     is_int8 = args.weight_format == "int8"
     is_int2_or_int3 = args.weight_format == "int2" or args.weight_format == "int3"
+    is_balanced = args.weight_format in ["int1_balanced", "int2_balanced"]
 
     weight_format_to_bits = {
+        "int1_balanced": 1,
         "int2": 2,
+        "int2_balanced": 2,
         "int3": 3,
         "int4": 4,
         "int8": 8,
@@ -528,7 +548,7 @@ def prepare_wc_config(args, default_configs):
 
     return {
         "bits": weight_format_to_bits.get(args.weight_format, 4),
-        "ratio": 1.0 if is_int8 else (args.ratio or default_configs["ratio"]),
+        "ratio": 1.0 if is_int8 or is_balanced else (args.ratio or default_configs["ratio"]),
         "sym": True if is_int2_or_int3 else (args.sym or False),
         "group_size": -1 if is_int8 else args.group_size,
         "all_layers": None if is_int8 else args.all_layers,
