@@ -158,6 +158,16 @@ def parse_args_openvino(parser: "ArgumentParser"):
         ),
     )
     optional_group.add_argument(
+        "--narrow-range",
+        action="store_true",
+        default=None,
+        help=(
+            "Use the narrow range of a symmetric integer grid (int2, int3, int4, int8 with --sym): codes in "
+            "[-(2^(bits-1) - 1), 2^(bits-1) - 1] with scale max|w| / (2^(bits-1) - 1). A group symmetric in "
+            "magnitude, such as {-d, 0, +d}, is then represented exactly. Not accepted for asymmetric or balanced formats."
+        ),
+    )
+    optional_group.add_argument(
         "--backup-precision",
         type=str,
         choices=["none", "int8_sym", "int8_asym"],
@@ -317,6 +327,7 @@ def no_compression_parameter_provided(args):
                 args.sensitivity_metric,
                 args.backup_precision,
                 args.group_size_fallback,
+                args.narrow_range,
             )
         )
     )
@@ -565,6 +576,7 @@ def prepare_wc_config(args, default_configs):
         "group_size_fallback": args.group_size_fallback
         if args.group_size_fallback
         else default_configs["group_size_fallback"],
+        "narrow_range": args.narrow_range,
     }
 
 
