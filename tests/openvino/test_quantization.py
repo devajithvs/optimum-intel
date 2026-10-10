@@ -2526,30 +2526,27 @@ class OVQuantizationConfigTest(unittest.TestCase):
         ref_nncf_dict = config_type().to_nncf_dict() | ref_nncf_dict
         self.assertTrue(self.compare_objects(nncf_dict, ref_nncf_dict))
 
-    @parameterized.expand(
-        [
-            ("int1_balanced", 1),
-            ("int2_balanced", 2),
-        ]
-    )
-    def test_balanced_weight_formats(self, dtype: str, bits: int):
+    def test_sign_weight_format(self):
         """
-        The balanced formats reach NNCF as their own modes, not as an integer width plus a sign, and the group size
-        and `all_layers` are passed through, so an already-grouped checkpoint (group size 128) can be reproduced.
+        The `int1` format reaches NNCF as the symmetric sign mode, not as an integer width plus a sign, and the group
+        size and `all_layers` are passed through, so an already-grouped checkpoint (group size 128) can be reproduced.
         """
-        config = OVWeightQuantizationConfig(dtype=dtype, group_size=128, all_layers=True)
+        config = OVWeightQuantizationConfig(dtype="int1", sym=True, group_size=128, all_layers=True)
         nncf_dict = config.to_nncf_dict()
 
-        self.assertEqual(config.bits, bits)
-        self.assertEqual(nncf_dict["mode"], nncf.CompressWeightsMode(dtype))
+        self.assertEqual(config.bits, 1)
+        self.assertEqual(nncf_dict["mode"], nncf.CompressWeightsMode.INT1_SYM)
         self.assertEqual(nncf_dict["group_size"], 128)
         self.assertEqual(nncf_dict["all_layers"], True)
         self.assertEqual(nncf_dict["ratio"], 1.0)
 
-    @parameterized.expand([("int1_balanced",), ("int2_balanced",)])
-    def test_balanced_weight_formats_reject_data_aware_algorithms(self, dtype: str):
+    def test_sign_weight_format_requires_symmetric(self):
+        with self.assertRaises(ValueError):
+            OVWeightQuantizationConfig(dtype="int1", sym=False)
+
+    def test_sign_weight_format_rejects_data_aware_algorithms(self):
         """
-        The balanced formats are data-free: they recover the scale of weights that are already binary or ternary.
+        The sign format is data-free: its scale is the group's mean absolute weight.
         """
         for kwargs in (
             {"quant_method": OVQuantizationMethod.AWQ},
@@ -2558,7 +2555,7 @@ class OVQuantizationConfigTest(unittest.TestCase):
             {"lora_correction": True},
         ):
             with self.assertRaises(ValueError):
-                OVWeightQuantizationConfig(dtype=dtype, **kwargs)
+                OVWeightQuantizationConfig(dtype="int1", sym=True, **kwargs)
 
     @parameterized.expand(
         [

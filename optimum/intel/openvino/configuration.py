@@ -626,19 +626,9 @@ _DEFAULT_2BIT_WQ_CONFIG = {
 }
 
 
-_DEFAULT_1BIT_BALANCED_WQ_CONFIG = {
+_DEFAULT_1BIT_WQ_CONFIG = {
     "bits": 1,
-    "dtype": "int1_balanced",
-    "ratio": 1.0,
-    "group_size": 128,
-    "all_layers": None,
-    "group_size_fallback": "ignore",
-}
-
-
-_DEFAULT_2BIT_BALANCED_WQ_CONFIG = {
-    "bits": 2,
-    "dtype": "int2_balanced",
+    "dtype": "int1",
     "ratio": 1.0,
     "group_size": 128,
     "all_layers": None,
@@ -1256,8 +1246,8 @@ class OVWeightQuantizationConfig(OVQuantizationConfigBase):
                 "quantization algorithm is selected and compression ratio is 1.0."
             )
 
-        if self.dtype in ["int2", "int3", "int4", "int8", "int1_balanced", "int2_balanced"]:
-            bits = {"int1_balanced": 1, "int2_balanced": 2, "int2": 2, "int3": 3, "int4": 4, "int8": 8}[self.dtype]
+        if self.dtype in ["int1", "int2", "int3", "int4", "int8"]:
+            bits = {"int1": 1, "int2": 2, "int3": 3, "int4": 4, "int8": 8}[self.dtype]
 
             if self.bits is not None and self.bits != bits:
                 logger.warning(
@@ -1315,13 +1305,15 @@ class OVWeightQuantizationConfig(OVQuantizationConfigBase):
             raise ValueError(f"Processor is expected to be a string, but found {self.processor}")
 
         if self.dtype is None:
-            self.dtype = {1: "int1_balanced", 2: "int2", 3: "int3", 4: "int4", 8: "int8"}[self.bits]
+            self.dtype = {1: "int1", 2: "int2", 3: "int3", 4: "int4", 8: "int8"}[self.bits]
 
-        if self.dtype not in ["int2", "int3", "int4", "int8", "mxfp4", "nf4", "cb4", "int1_balanced", "int2_balanced"]:
+        if self.dtype not in ["int1", "int2", "int3", "int4", "int8", "mxfp4", "nf4", "cb4"]:
             raise ValueError(
                 "Weights quantization data type must be one of the following: "
-                f"['int2', 'int3', 'int4', 'int8', 'mxfp4', 'nf4', 'cb4', 'int1_balanced', 'int2_balanced'], but found: {self.dtype}."
+                f"['int1', 'int2', 'int3', 'int4', 'int8', 'mxfp4', 'nf4', 'cb4'], but found: {self.dtype}."
             )
+        if self.dtype == "int1" and not self.sym:
+            raise ValueError("The 'int1' weight format is a symmetric sign grid: set `sym=True`.")
         if self.dtype in ["mxfp4", "nf4", "cb4"]:
             if self.bits != 4:
                 raise ValueError(
@@ -1336,9 +1328,9 @@ class OVWeightQuantizationConfig(OVQuantizationConfigBase):
                     raise ValueError("The GPTQ algorithm is not supported for 'mxfp4' data type")
                 if self.lora_correction:
                     raise ValueError("The LoRA Correction algorithm is not supported for 'mxfp4' data type")
-        if self.dtype in ["int1_balanced", "int2_balanced"]:
-            # The balanced formats are data-free: they recover the scale of weights that are already binary or
-            # ternary, so there is nothing for a data-aware algorithm to fit.
+        if self.dtype == "int1":
+            # The sign grid is data-free: its scale is the group's mean absolute weight, so there is nothing for a
+            # data-aware algorithm to fit.
             if self.quant_method == OVQuantizationMethod.AWQ:
                 raise ValueError(f"The AWQ algorithm is not supported for '{self.dtype}' data type")
             if self.scale_estimation:
@@ -1367,6 +1359,9 @@ class OVWeightQuantizationConfig(OVQuantizationConfigBase):
         mode = self.dtype if self.dtype else signed_bitness[self.bits]
         if mode in signed_bitness.values():
             mode += "_sym" if self.sym else "_asym"
+        if mode == "int1":
+            # The sign grid is symmetric by definition (ADR-0014).
+            mode = "int1_sym"
 
         if mode == "cb4" and is_nncf_version("<=", "2.19"):
             mode = "cb4_f8e4m3"

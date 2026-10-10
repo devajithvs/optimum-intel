@@ -1329,22 +1329,23 @@ class OVCLIExportTestCase(unittest.TestCase):
 
     @parameterized.expand(
         [
-            ("int1_balanced", {"u1": 16, "f16": 32}),
-            ("int2_balanced", {"u2": 16, "u4": 16, "f16": 16}),
+            ("int1", "", {"s1": 16, "f16": 16}),
+            ("int2", "--narrow-range", {"i2": 16, "f16": 16}),
         ]
     )
-    def test_exporters_cli_balanced_weight_formats(self, weight_format: str, expected_num_weight_nodes: Dict[str, int]):
+    def test_exporters_cli_zero_point_free_weight_formats(
+        self, weight_format: str, extra_args: str, expected_num_weight_nodes: Dict[str, int]
+    ):
         """
-        The balanced formats are exported as packed `u1`/`u2` weights with the dequantization subgraph the runtime
-        recognizes: a `u4` zero point behind a `Convert` for `int2_balanced`, an f16 zero point of 1/2 for
-        `int1_balanced` (no integer type holds 1/2) and an f16 scale for both.
+        The sign format (`int1`) and the narrow-range `int2` are exported as signed packed weights (`s1` and `i2`)
+        with a `Convert` and a `Multiply` by the scale and no zero point (ADR-0014).
         """
         import openvino as ov
 
         with TemporaryDirectory() as tmpdir:
             subprocess.run(
                 f"optimum-cli export openvino --model {MODEL_NAMES['llama']} --task text-generation-with-past "
-                f"--weight-format {weight_format} --group-size 16 --ratio 1.0 --all-layers {tmpdir}",
+                f"--weight-format {weight_format} {extra_args} --group-size 16 --ratio 1.0 --all-layers {tmpdir}",
                 shell=True,
                 check=True,
                 capture_output=True,
