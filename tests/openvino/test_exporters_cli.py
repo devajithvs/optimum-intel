@@ -14,6 +14,7 @@
 import json
 import subprocess
 import unittest
+from collections import Counter
 from pathlib import Path
 from typing import Dict
 from unittest.mock import Mock
@@ -1324,6 +1325,38 @@ class OVCLIExportTestCase(unittest.TestCase):
             self.assertTrue("--gptq" not in option or b"Applying GPTQ" in result.stdout)
             self.assertTrue(
                 "--lora-correction" not in option or b"with correction of low-rank adapters" in result.stdout
+            )
+
+    @parameterized.expand(
+        [
+            ("int1", "", {"s1": 16, "f16": 16}),
+            ("int2", "--narrow-range", {"i2": 16, "f16": 16}),
+        ]
+    )
+    def test_exporters_cli_zero_point_free_weight_formats(
+        self, weight_format: str, extra_args: str, expected_num_weight_nodes: Dict[str, int]
+    ):
+        """
+        The sign format (`int1`) and the narrow-range `int2` are exported as signed packed weights (`s1` and `i2`)
+        with a `Convert` and a `Multiply` by the scale and no zero point (ADR-0014).
+        """
+        import openvino as ov
+
+        with TemporaryDirectory() as tmpdir:
+            subprocess.run(
+                f"optimum-cli export openvino --model {MODEL_NAMES['llama']} --task text-generation-with-past "
+                f"--weight-format {weight_format} {extra_args} --group-size 16 --ratio 1.0 --all-layers {tmpdir}",
+                shell=True,
+                check=True,
+                capture_output=True,
+            )
+            model = ov.Core().read_model(Path(tmpdir) / "openvino_model.xml")
+            num_consts = Counter(
+                op.get_element_type().get_type_name() for op in model.get_ops() if op.get_type_name() == "Constant"
+            )
+            self.assertEqual(
+                expected_num_weight_nodes,
+                {type_name: num_consts[type_name] for type_name in expected_num_weight_nodes},
             )
 
     def test_exporters_cli_4bit_with_statistics_path(self):
