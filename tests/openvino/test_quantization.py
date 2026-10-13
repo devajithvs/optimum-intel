@@ -2611,6 +2611,16 @@ class OVQuantizationConfigTest(unittest.TestCase):
         default = OVWeightQuantizationConfig(bits=4, sym=True, group_size=128, ratio=1.0).to_nncf_dict()
         self.assertNotIn("advanced_parameters", default)
 
+    def test_mse_scale_reaches_nncf_advanced_parameters(self):
+        searched = OVWeightQuantizationConfig(
+            bits=2, sym=True, group_size=128, ratio=1.0, mse_scale=True
+        ).to_nncf_dict()
+        self.assertEqual(searched["mode"], nncf.CompressWeightsMode.INT2_SYM)
+        self.assertTrue(searched["advanced_parameters"].mse_scale)
+
+        default = OVWeightQuantizationConfig(bits=2, sym=True, group_size=128, ratio=1.0).to_nncf_dict()
+        self.assertNotIn("advanced_parameters", default)
+
     @staticmethod
     def compare_objects(o1, o2) -> bool:
         if dataclasses.is_dataclass(o1) and dataclasses.is_dataclass(o2):
