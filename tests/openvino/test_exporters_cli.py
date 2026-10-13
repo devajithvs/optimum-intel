@@ -1330,14 +1330,14 @@ class OVCLIExportTestCase(unittest.TestCase):
     @parameterized.expand(
         [
             ("int1", "", {"s1": 16, "f16": 16}),
-            ("int2", "--narrow-range", {"i2": 16, "f16": 16}),
+            ("int2", "--mse-scale", {"i2": 16, "f16": 16}),
         ]
     )
     def test_exporters_cli_zero_point_free_weight_formats(
         self, weight_format: str, extra_args: str, expected_num_weight_nodes: Dict[str, int]
     ):
         """
-        The sign format (`int1`) and the narrow-range `int2` are exported as signed packed weights (`s1` and `i2`)
+        The sign format (`int1`) and the least-error `int2` are exported as signed packed weights (`s1` and `i2`)
         with a `Convert` and a `Multiply` by the scale and no zero point (ADR-0014).
         """
         import openvino as ov

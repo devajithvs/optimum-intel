@@ -158,16 +158,6 @@ def parse_args_openvino(parser: "ArgumentParser"):
         ),
     )
     optional_group.add_argument(
-        "--narrow-range",
-        action="store_true",
-        default=None,
-        help=(
-            "Use the narrow range of a symmetric integer grid (int2, int3, int4, int8 with --sym): codes in "
-            "[-(2^(bits-1) - 1), 2^(bits-1) - 1] with scale max|w| / (2^(bits-1) - 1). A group symmetric in "
-            "magnitude, such as {-d, 0, +d}, is then represented exactly. Not accepted for asymmetric formats or for int1."
-        ),
-    )
-    optional_group.add_argument(
         "--mse-scale",
         action="store_true",
         default=None,
@@ -175,8 +165,7 @@ def parse_args_openvino(parser: "ArgumentParser"):
             "Choose each group's scale by a data-free mean-squared-error search over candidate scales on the group's "
             "own weights, on the full-range grid (int2, int3, int4, int8 with --sym): codes in "
             "[-2^(bits-1), 2^(bits-1) - 1]. A group of two levels, such as {-d, +d}, is then represented exactly while "
-            "a group with a spread of magnitudes still uses every level. Cannot be combined with --narrow-range, and "
-            "not accepted for asymmetric formats or for int1."
+            "a group with a spread of magnitudes still uses every level. Not accepted for asymmetric formats or for int1."
         ),
     )
     optional_group.add_argument(
@@ -339,7 +328,6 @@ def no_compression_parameter_provided(args):
                 args.sensitivity_metric,
                 args.backup_precision,
                 args.group_size_fallback,
-                args.narrow_range,
                 args.mse_scale,
             )
         )
@@ -580,7 +568,6 @@ def prepare_wc_config(args, default_configs):
         "group_size_fallback": args.group_size_fallback
         if args.group_size_fallback
         else default_configs["group_size_fallback"],
-        "narrow_range": args.narrow_range,
         "mse_scale": args.mse_scale,
     }
 

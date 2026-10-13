@@ -1126,18 +1126,12 @@ class OVWeightQuantizationConfig(OVQuantizationConfigBase):
             - "adjust": automatically adjusts the group size to the maximum compatible value for each weight tensor,
                 if there is no valid value greater than or equal to 32, then the node is quantized to the backup precision
                 which is int8_asym by default.
-        narrow_range (`bool`, *optional*):
-            Whether to use the narrow range of the symmetric integer grid: codes in
-            [-(2^(bits-1) - 1), 2^(bits-1) - 1] with scale max|w| / (2^(bits-1) - 1), instead of the full range with
-            scale max|w| / 2^(bits-1). It represents a group that is symmetric in magnitude exactly, and it is accepted
-            only for the symmetric integer formats (`int2`, `int3`, `int4`, `int8` with `sym=True`). Defaults to False.
         mse_scale (`bool`, *optional*):
             Whether to choose each group's scale by a data-free mean-squared-error search over candidate scales on
-            the group's own weights, instead of the closed-form `max|w| / 2^(bits-1)` (or `max|w| / (2^(bits-1) - 1)`
-            with `narrow_range`) rules. The search uses the full-range grid `[-2^(bits-1), 2^(bits-1) - 1]` and its
-            candidates include `max|w|` itself, so a group of two levels is represented exactly while a group with a
-            spread of magnitudes is free to use every level. No calibration data is used. It is accepted only for the
-            symmetric integer formats and cannot be combined with `narrow_range`. Defaults to False.
+            the group's own weights, instead of the closed-form `max|w| / 2^(bits-1)` rule. The search uses the
+            full-range grid `[-2^(bits-1), 2^(bits-1) - 1]` and its candidates include `max|w|` itself, so a group of
+            two levels is represented exactly while a group with a spread of magnitudes is free to use every level. No
+            calibration data is used. It is accepted only for the symmetric integer formats. Defaults to False.
         dq_group_size (`int`, *optional*):
             Group size to be used for dynamic quantization of activations. Applied by setting
             "DYNAMIC_QUANTIZATION_GROUP_SIZE" runtime info value in the OpenVINO model IR. If not explicitly set,
@@ -1167,7 +1161,6 @@ class OVWeightQuantizationConfig(OVQuantizationConfigBase):
         backup_precision: Optional[str] = None,
         statistics_path: Optional[str] = None,
         group_size_fallback: Optional[str] = None,
-        narrow_range: Optional[bool] = None,
         mse_scale: Optional[bool] = None,
         dq_group_size: Optional[int] = None,
         **kwargs,
@@ -1201,7 +1194,6 @@ class OVWeightQuantizationConfig(OVQuantizationConfigBase):
         self.dtype = dtype
         self.statistics_path = statistics_path
         self.group_size_fallback = group_size_fallback
-        self.narrow_range = narrow_range
         self.mse_scale = mse_scale
         self.dq_group_size = dq_group_size
         self.post_init()
@@ -1380,7 +1372,7 @@ class OVWeightQuantizationConfig(OVQuantizationConfigBase):
         sensitivity_metric = nncf.SensitivityMetric(self.sensitivity_metric) if self.sensitivity_metric else None
         backup_mode = nncf.BackupMode(self.backup_precision) if self.backup_precision else None
         kwargs = self.kwargs.copy()
-        if self.statistics_path or self.group_size_fallback or self.narrow_range or self.mse_scale:
+        if self.statistics_path or self.group_size_fallback or self.mse_scale:
             advanced_parameters = kwargs.get("advanced_parameters", nncf.AdvancedCompressionParameters())
             if self.statistics_path:
                 advanced_parameters = dataclasses.replace(advanced_parameters, statistics_path=self.statistics_path)
@@ -1388,8 +1380,6 @@ class OVWeightQuantizationConfig(OVQuantizationConfigBase):
                 advanced_parameters = dataclasses.replace(
                     advanced_parameters, group_size_fallback_mode=nncf.GroupSizeFallbackMode(self.group_size_fallback)
                 )
-            if self.narrow_range:
-                advanced_parameters = dataclasses.replace(advanced_parameters, narrow_range=True)
             if self.mse_scale:
                 advanced_parameters = dataclasses.replace(advanced_parameters, mse_scale=True)
             kwargs["advanced_parameters"] = advanced_parameters

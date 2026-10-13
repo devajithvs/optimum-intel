@@ -2601,16 +2601,6 @@ class OVQuantizationConfigTest(unittest.TestCase):
                 else:
                     self.assertEqual(v, config_v)
 
-    def test_narrow_range_reaches_nncf_advanced_parameters(self):
-        narrow = OVWeightQuantizationConfig(
-            bits=4, sym=True, group_size=128, ratio=1.0, narrow_range=True
-        ).to_nncf_dict()
-        self.assertEqual(narrow["mode"], nncf.CompressWeightsMode.INT4_SYM)
-        self.assertTrue(narrow["advanced_parameters"].narrow_range)
-
-        default = OVWeightQuantizationConfig(bits=4, sym=True, group_size=128, ratio=1.0).to_nncf_dict()
-        self.assertNotIn("advanced_parameters", default)
-
     def test_mse_scale_reaches_nncf_advanced_parameters(self):
         searched = OVWeightQuantizationConfig(
             bits=2, sym=True, group_size=128, ratio=1.0, mse_scale=True
