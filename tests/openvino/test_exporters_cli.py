@@ -1406,6 +1406,39 @@ class OVCLIExportTestCase(unittest.TestCase):
             self.assertEqual(_weight_constant_shapes(narrow, "i2"), _weight_constant_shapes(full, "i2"))
             self.assertEqual(_int2_weight_codes(narrow), {-1, 0, 1})
 
+    def test_exporters_cli_int1_with_default_config(self):
+        """
+        `int1` alone selects the 2-bit defaults: the same weights, with the same grouping, as `int2` alone.
+        """
+        with TemporaryDirectory() as tmpdir:
+            for weight_format in ("int2", "int1"):
+                subprocess.run(
+                    f"optimum-cli export openvino --model {MODEL_NAMES['llama']} --task text-generation-with-past "
+                    f"--weight-format {weight_format} {tmpdir}/{weight_format}",
+                    shell=True,
+                    check=True,
+                    capture_output=True,
+                )
+            int2 = Path(tmpdir) / "int2" / "openvino_model.xml"
+            int1 = Path(tmpdir) / "int1" / "openvino_model.xml"
+            self.assertEqual(_weight_constant_shapes(int1, "s1"), _weight_constant_shapes(int2, "i2"))
+
+    def test_exporters_cli_int1(self):
+        """
+        `int1` stores one sign bit per weight in the `s1` element type, with an f16 group scale per weight.
+        """
+        with TemporaryDirectory() as tmpdir:
+            subprocess.run(
+                f"optimum-cli export openvino --model {MODEL_NAMES['llama']} --task text-generation-with-past "
+                f"--weight-format int1 --group-size 16 --ratio 1.0 --all-layers {tmpdir}",
+                shell=True,
+                check=True,
+                capture_output=True,
+            )
+            num_consts = _constant_type_counts(Path(tmpdir) / "openvino_model.xml")
+            self.assertEqual(num_consts["s1"], 16)
+            self.assertEqual(num_consts["f16"], 16)
+
     def test_exporters_cli_4bit_with_statistics_path(self):
         with TemporaryDirectory() as tmpdir:
             statistics_path = f"{tmpdir}/statistics"
