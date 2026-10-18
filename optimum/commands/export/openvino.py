@@ -67,12 +67,14 @@ def parse_args_openvino(parser: "ArgumentParser"):
     optional_group.add_argument(
         "--weight-format",
         type=str,
-        choices=["fp32", "fp16", "int8", "int4", "mxfp4", "nf4", "cb4", "int3", "int2", "int1"],
+        choices=["fp32", "fp16", "int8", "int4", "mxfp4", "nf4", "cb4", "int3", "int2", "int1", "ternary"],
         default=None,
         help=(
             "The weight format of the exported model. Option 'cb4' represents a codebook with 16 fixed fp8 values in E4M3 format. "
             "Option 'int1' is a balanced binary sign format: each weight is -s or +s, stored as one sign bit with no zero "
-            "point and the group scale mean|w|; it is exact on a checkpoint whose weights are already {-s, +s}."
+            "point and the group scale mean|w|; it is exact on a checkpoint whose weights are already {-s, +s}. "
+            "Option 'ternary' is the preset `int2 --sym --narrow-range --group-size 128`: codes {-s, 0, +s}, exact on a "
+            "ternary checkpoint."
         ),
     )
     optional_group.add_argument(
@@ -359,6 +361,7 @@ class OVExportCommand(BaseOptimumCLICommand):
         from ...intel.openvino.configuration import (
             _DEFAULT_1BIT_WQ_CONFIG,
             _DEFAULT_2BIT_WQ_CONFIG,
+            _DEFAULT_TERNARY_WQ_CONFIG,
             _DEFAULT_3BIT_WQ_CONFIG,
             _DEFAULT_4BIT_WQ_CONFIG,
             OVConfig,
@@ -411,7 +414,13 @@ class OVExportCommand(BaseOptimumCLICommand):
             if self.args.weight_format is not None:
                 quantization_config = prepare_wc_config(self.args, _DEFAULT_4BIT_WQ_CONFIG)
 
-                if no_compression_parameter_provided(self.args) and self.args.weight_format == "int1":
+                if no_compression_parameter_provided(self.args) and self.args.weight_format == "ternary":
+                    # The preset is int2 + sym + narrow range + group 128: one mechanism, a discoverable name.
+                    quantization_config = _DEFAULT_TERNARY_WQ_CONFIG
+                    logger.info(f"Applying a default quantization config: {quantization_config}.")
+                    if self.args.quantization_statistics_path is not None:
+                        quantization_config["statistics_path"] = self.args.quantization_statistics_path
+                elif no_compression_parameter_provided(self.args) and self.args.weight_format == "int1":
                     # The sign format is exact on a checkpoint that is already binary, so its group size has to
                     # match the checkpoint's own grouping (128 in the published models).
                     quantization_config = _DEFAULT_1BIT_WQ_CONFIG
@@ -540,10 +549,12 @@ def prepare_wc_config(args, default_configs):
     is_int8 = args.weight_format == "int8"
     is_int2_or_int3 = args.weight_format == "int2" or args.weight_format == "int3"
     is_int1 = args.weight_format == "int1"
+    is_ternary = args.weight_format == "ternary"
 
     weight_format_to_bits = {
         "int1": 1,
         "int2": 2,
+        "ternary": 2,
         "int3": 3,
         "int4": 4,
         "int8": 8,
@@ -551,8 +562,8 @@ def prepare_wc_config(args, default_configs):
 
     return {
         "bits": weight_format_to_bits.get(args.weight_format, 4),
-        "ratio": 1.0 if is_int8 or is_int1 else (args.ratio or default_configs["ratio"]),
-        "sym": True if (is_int1 or is_int2_or_int3) else (args.sym or False),
+        "ratio": 1.0 if (is_int8 or is_int1 or is_ternary) else (args.ratio or default_configs["ratio"]),
+        "sym": True if (is_int1 or is_int2_or_int3 or is_ternary) else (args.sym or False),
         "group_size": -1 if is_int8 else args.group_size,
         "all_layers": None if is_int8 else args.all_layers,
         "dataset": args.dataset,
@@ -562,13 +573,13 @@ def prepare_wc_config(args, default_configs):
         "scale_estimation": args.scale_estimation,
         "gptq": args.gptq,
         "lora_correction": args.lora_correction,
-        "dtype": args.weight_format,
+        "dtype": "int2" if is_ternary else args.weight_format,
         "backup_precision": args.backup_precision,
         "statistics_path": args.quantization_statistics_path,
         "group_size_fallback": args.group_size_fallback
         if args.group_size_fallback
         else default_configs["group_size_fallback"],
-        "narrow_range": args.narrow_range,
+        "narrow_range": True if is_ternary else args.narrow_range,
     }
 
 

@@ -626,6 +626,18 @@ _DEFAULT_2BIT_WQ_CONFIG = {
 }
 
 
+_DEFAULT_TERNARY_WQ_CONFIG = {
+    "bits": 2,
+    "dtype": "int2",
+    "ratio": 1.0,
+    "sym": True,  # the preset is the symmetric narrow range
+    "group_size": 128,
+    "all_layers": None,
+    "group_size_fallback": "ignore",
+    "narrow_range": True,
+}
+
+
 _DEFAULT_1BIT_WQ_CONFIG = {
     "bits": 1,
     "dtype": "int1",
