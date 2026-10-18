@@ -14,10 +14,12 @@
 import json
 import subprocess
 import unittest
+from collections import Counter
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Set
 from unittest.mock import Mock
 
+import numpy as np
 from parameterized import parameterized
 from transformers import (
     AutoModelForCausalLM,
@@ -88,6 +90,43 @@ from optimum.intel.utils.import_utils import (
     is_transformers_version,
 )
 from optimum.utils.save_utils import maybe_save_preprocessors
+
+
+def _constant_type_counts(model_path: Path) -> Counter:
+    """The element types of an exported IR's constants, by count."""
+    import openvino as ov
+
+    model = ov.Core().read_model(model_path)
+    return Counter(op.get_element_type().get_type_name() for op in model.get_ops() if op.get_type_name() == "Constant")
+
+
+def _weight_constants(model_path: Path, element_type: str) -> List:
+    """The weight constants of an exported IR that carry the given element type, e.g. "i2" or "s1"."""
+    import openvino as ov
+
+    model = ov.Core().read_model(model_path)
+    return [
+        op
+        for op in model.get_ops()
+        if op.get_type_name() == "Constant" and op.get_element_type().get_type_name() == element_type
+    ]
+
+
+def _int2_weight_codes(model_path: Path) -> Set:
+    """The signed codes an IR stores in its int2 weights - NNCF packs four of them per byte."""
+    lookup = np.array([0, 1, -2, -1], dtype=np.int8)
+    packed = []
+    for op in _weight_constants(model_path, "i2"):
+        raw = np.array(op.get_data().data).view(np.uint8)
+        packed.append(np.stack([(raw >> shift) & 0b11 for shift in (0, 2, 4, 6)], axis=-1).reshape(-1))
+    if not packed:
+        return set()
+    return set(lookup[np.concatenate(packed)].tolist())
+
+
+def _weight_constant_shapes(model_path: Path, element_type: str) -> List:
+    """The shapes of an IR's weight constants of the given element type, whose last dimension is the group size."""
+    return sorted(tuple(op.get_shape()) for op in _weight_constants(model_path, element_type))
 
 
 def _task_and_model_type_name(testcase_func, param_num, params):
@@ -1325,6 +1364,47 @@ class OVCLIExportTestCase(unittest.TestCase):
             self.assertTrue(
                 "--lora-correction" not in option or b"with correction of low-rank adapters" in result.stdout
             )
+
+    def test_exporters_cli_narrow_range_two_bit(self):
+        """
+        `int2 --sym --narrow-range` stores the narrow three-level grid as a signed i2 weight with f16 scales: its
+        codes are -1, 0 and +1, where the same export without the flag also stores -2.
+        """
+        with TemporaryDirectory() as tmpdir:
+            for name, narrow_range in (("full", ""), ("narrow", "--narrow-range")):
+                subprocess.run(
+                    f"optimum-cli export openvino --model {MODEL_NAMES['llama']} --task text-generation-with-past "
+                    f"--weight-format int2 --sym {narrow_range} --group-size 16 --ratio 1.0 --all-layers {tmpdir}/{name}",
+                    shell=True,
+                    check=True,
+                    capture_output=True,
+                )
+            narrow = Path(tmpdir) / "narrow" / "openvino_model.xml"
+            num_consts = _constant_type_counts(narrow)
+            self.assertEqual(num_consts["i2"], 16)
+            self.assertEqual(num_consts["f16"], 16)
+
+            self.assertEqual(_int2_weight_codes(Path(tmpdir) / "full" / "openvino_model.xml"), {-2, -1, 0, 1})
+            self.assertEqual(_int2_weight_codes(narrow), {-1, 0, 1})
+
+    def test_exporters_cli_narrow_range_with_default_config(self):
+        """
+        `--narrow-range` alone selects the same default configuration as `int2` alone: the flag changes the grid,
+        not the grouping the format's own default configuration sets.
+        """
+        with TemporaryDirectory() as tmpdir:
+            for name, narrow_range in (("int2", ""), ("narrow", "--narrow-range")):
+                subprocess.run(
+                    f"optimum-cli export openvino --model {MODEL_NAMES['llama']} --task text-generation-with-past "
+                    f"--weight-format int2 {narrow_range} {tmpdir}/{name}",
+                    shell=True,
+                    check=True,
+                    capture_output=True,
+                )
+            full = Path(tmpdir) / "int2" / "openvino_model.xml"
+            narrow = Path(tmpdir) / "narrow" / "openvino_model.xml"
+            self.assertEqual(_weight_constant_shapes(narrow, "i2"), _weight_constant_shapes(full, "i2"))
+            self.assertEqual(_int2_weight_codes(narrow), {-1, 0, 1})
 
     def test_exporters_cli_4bit_with_statistics_path(self):
         with TemporaryDirectory() as tmpdir:
