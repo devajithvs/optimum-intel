@@ -14,6 +14,7 @@
 import json
 import subprocess
 import unittest
+from collections import Counter
 from pathlib import Path
 from typing import Dict
 from unittest.mock import Mock
@@ -1325,6 +1326,28 @@ class OVCLIExportTestCase(unittest.TestCase):
             self.assertTrue(
                 "--lora-correction" not in option or b"with correction of low-rank adapters" in result.stdout
             )
+
+    def test_exporters_cli_narrow_range_two_bit(self):
+        """
+        `int2 --sym --narrow-range` emits the three-level narrow grid as a signed i2 weight with f16 scales and
+        no zero point.
+        """
+        import openvino as ov
+
+        with TemporaryDirectory() as tmpdir:
+            subprocess.run(
+                f"optimum-cli export openvino --model {MODEL_NAMES['llama']} --task text-generation-with-past "
+                f"--weight-format int2 --sym --narrow-range --group-size 16 --ratio 1.0 --all-layers {tmpdir}",
+                shell=True,
+                check=True,
+                capture_output=True,
+            )
+            model = ov.Core().read_model(Path(tmpdir) / "openvino_model.xml")
+            num_consts = Counter(
+                op.get_element_type().get_type_name() for op in model.get_ops() if op.get_type_name() == "Constant"
+            )
+            self.assertEqual(num_consts["i2"], 16)
+            self.assertEqual(num_consts["f16"], 16)
 
     def test_exporters_cli_4bit_with_statistics_path(self):
         with TemporaryDirectory() as tmpdir:
