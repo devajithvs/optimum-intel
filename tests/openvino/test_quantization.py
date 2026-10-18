@@ -2508,6 +2508,31 @@ class OVQuantizationConfigTest(unittest.TestCase):
         prepared_config = _quantization_config_from_dict(custom_configuration)
         self.compare_config_dict_to_config_object(custom_configuration, prepared_config)
 
+    def test_sign_weight_format(self):
+        """
+        `int1` reaches NNCF as the symmetric sign mode, with bits=1 and sym implied, and a group size that can
+        match the checkpoint's own grouping.
+        """
+        config = OVWeightQuantizationConfig(dtype="int1", group_size=128, all_layers=True)
+        nncf_dict = config.to_nncf_dict()
+        self.assertEqual(config.bits, 1)
+        self.assertTrue(config.sym)
+        self.assertEqual(nncf_dict["mode"], nncf.CompressWeightsMode.INT1_SYM)
+        self.assertEqual(nncf_dict["group_size"], 128)
+        self.assertTrue(nncf_dict["all_layers"])
+        self.assertEqual(nncf_dict["ratio"], 1.0)
+
+    def test_sign_weight_format_rejects_data_aware_algorithms(self):
+        for kwargs in (
+            {"quant_method": OVQuantizationMethod.AWQ},
+            {"scale_estimation": True},
+            {"gptq": True},
+            {"lora_correction": True},
+            {"dataset": "wikitext2"},
+        ):
+            with self.assertRaises(ValueError):
+                OVWeightQuantizationConfig(dtype="int1", **kwargs)
+
     def test_narrow_range_reaches_nncf_advanced_parameters(self):
         """
         `narrow_range` is an NNCF advanced compression parameter, and it is only accepted for a symmetric
