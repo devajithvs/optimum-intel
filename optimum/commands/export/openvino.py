@@ -71,8 +71,9 @@ def parse_args_openvino(parser: "ArgumentParser"):
         default=None,
         help=(
             "The weight format of the exported model. Option 'cb4' represents a codebook with 16 fixed fp8 values in E4M3 format. "
-            "Option 'int1' is a balanced binary sign format: each compressed weight is -s or +s, stored as one sign bit with no "
-            "zero point and the group scale mean|w|; it is exact on a checkpoint whose weights are already {-s, +s}. Embeddings "
+            "Option 'int1' is a balanced binary sign format: each compressed weight is -s or +s, stored as a u1 "
+            "code with a scalar zero point of 0.5 and twice the group scale mean|w|; it is exact on a checkpoint "
+            "whose weights are already {-s, +s}. Embeddings "
             "and the last MatMul are compressed to INT8 unless --all-layers is set."
         ),
     )

@@ -1095,8 +1095,8 @@ class OVWeightQuantizationConfig(OVQuantizationConfigBase):
             Data type weights are compressed to. Possible values: ['int1', 'int2', 'int3', 'int4', 'int8', 'mxfp4',
             'nf4', 'cb4'].
             Option 'cb4' represents a codebook with 16 fixed fp8 values in E4M3 format. Option 'int1' is a balanced
-            binary (sign) format: each weight is -s or +s, stored as one sign bit with no zero point and the group
-            scale `s = mean|w|`; it is exact on weights that are already {-s, +s} and data-free.
+            binary (sign) format: each weight is -s or +s, stored as a u1 code with a scalar zero point of 0.5 and
+            twice the group scale `s = mean|w|`; it is exact on weights that are already {-s, +s} and data-free.
         narrow_range (`bool`, *optional*):
             Use the narrow symmetric range for the integer weight formats: the codes are `+-(2^(b-1)-1)` and the
             scale is `max|w|/(2^(b-1)-1)`, so a group whose weights are `{+/-s}` or `{-s, 0, +s}` is represented
