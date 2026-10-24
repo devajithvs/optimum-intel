@@ -14,6 +14,9 @@
 import json
 import subprocess
 import unittest
+
+import numpy as np
+import openvino as ov
 from pathlib import Path
 from typing import Dict
 from unittest.mock import Mock, patch
@@ -105,6 +108,18 @@ def _task_and_model_type_name(testcase_func, param_num, params):
     task, model_type = params.args[0], params.args[1]
     safe_name = parameterized.to_safe_name
     return f"{testcase_func.__name__}_{param_num}_{safe_name(task)}_{safe_name(model_type)}"
+
+
+def _get_int2_scale_values(model: ov.Model) -> np.ndarray:
+    """The scale constants that belong to the 2-bit weights of an exported model."""
+    constants = {op.get_friendly_name(): op for op in model.get_ops() if op.get_type_name() == "Constant"}
+    return np.concatenate(
+        [
+            np.asarray(constants[f"{name}/scale"].get_data()).reshape(-1)
+            for name, const in constants.items()
+            if const.get_element_type().get_bitwidth() == 2 and f"{name}/scale" in constants
+        ]
+    )
 
 
 class OVCLIExportTestCase(unittest.TestCase):
@@ -1247,6 +1262,25 @@ class OVCLIExportTestCase(unittest.TestCase):
                         f"Expected text:\n{reference_input_text_gen_prompt}\nSimplified text:\n{simplified_input_text_gen_prompt}",
                     )
 
+    def test_exporters_cli_narrow_range(self):
+        # INT2's narrow grid divides the group maximum by 1 instead of 2, so every 2-bit scale of the
+        # `--narrow-range` export is exactly twice the scale of the plain one on the same weights: the flag
+        # has to reach NNCF through the default-config branch.
+        scales = {}
+        for option in ("int2", "int2 --narrow-range"):
+            with TemporaryDirectory() as tmpdir:
+                subprocess.run(
+                    f"optimum-cli export openvino --model {MODEL_NAMES['opt125m']} --task text-generation-with-past "
+                    f"--weight-format {option} {tmpdir}",
+                    shell=True,
+                    check=True,
+                    capture_output=True,
+                )
+                model = OVModelForCausalLM.from_pretrained(tmpdir)
+                scales[option] = _get_int2_scale_values(model.model)
+
+        np.testing.assert_allclose(scales["int2 --narrow-range"], 2 * scales["int2"], rtol=1e-3)
+
     @parameterized.expand(SUPPORTED_ARCHITECTURES, name_func=_task_and_model_type_name)
     def test_exporters_cli_fp16(self, task: str, model_type: str):
         with TemporaryDirectory() as tmpdir:
@@ -1697,6 +1731,24 @@ class OVCLIExportTestCase(unittest.TestCase):
                 )
             self.assertIn(
                 "Some compression parameters are provided, but the weight format is not specified.",
+                str(exc_info.exception.stderr),
+            )
+
+    def test_export_openvino_with_narrow_range_and_quant_mode(self):
+        # The narrow range belongs to the weight-only formats; with --quant-mode the flag would be silently dropped.
+        with TemporaryDirectory() as tmpdir:
+            with self.assertRaises(subprocess.CalledProcessError) as exc_info:
+                subprocess.run(
+                    f"optimum-cli export openvino --model {MODEL_NAMES['gpt2']} --task text-generation "
+                    f"--quant-mode int8 --narrow-range {tmpdir}",
+                    shell=True,
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+            self.assertIn(
+                "The --narrow-range argument applies to the weight-only formats",
                 str(exc_info.exception.stderr),
             )
 
