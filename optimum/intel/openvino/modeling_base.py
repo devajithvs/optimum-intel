@@ -30,6 +30,7 @@ from transformers.utils.hub import cached_file
 from optimum.exporters.base import ExportConfig
 from optimum.exporters.openvino import export, main_export
 from optimum.intel.openvino.configuration import (
+    _DEFAULT_1BIT_WQ_CONFIG,
     _DEFAULT_2BIT_WQ_CONFIG,
     _DEFAULT_3BIT_WQ_CONFIG,
     _DEFAULT_4BIT_WQ_CONFIG,
@@ -683,7 +684,7 @@ class OVBaseModel(OptimizedModel, OVModelHostMixin):
         """
 
         # # If the config is specified as {"bits": N}, use the default N-bit quantization configuration.
-        if quantization_config in ({"bits": 2}, {"bits": 3}, {"bits": 4}, {"bits": 8}):
+        if quantization_config in ({"bits": 1}, {"bits": 2}, {"bits": 3}, {"bits": 4}, {"bits": 8}):
             if quantization_config == {"bits": 4} and model_name_or_path in [
                 "openai/gpt-oss-20b",
                 "openai/gpt-oss-120b",
@@ -700,6 +701,7 @@ class OVBaseModel(OptimizedModel, OVModelHostMixin):
                 quantization_config = default_config
             else:
                 quantization_config = {
+                    1: _DEFAULT_1BIT_WQ_CONFIG,
                     2: _DEFAULT_2BIT_WQ_CONFIG,
                     3: _DEFAULT_3BIT_WQ_CONFIG,
                     4: _DEFAULT_4BIT_WQ_CONFIG,

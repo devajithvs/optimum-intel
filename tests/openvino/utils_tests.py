@@ -1002,6 +1002,7 @@ def get_num_quantized_nodes(model):
         "nf4": "nf4",
         "f8e4m3": "f8e4m3",
         "f8e5m2": "f8e5m2",
+        "u1": "int1",
     }
     num_weight_nodes = dict.fromkeys(types_map.values(), 0)
     ov_model = model if isinstance(model, ov.Model) else model.model
