@@ -624,6 +624,16 @@ for m_id_1, m_id_2 in model_id_aliases:
     _DEFAULT_4BIT_WQ_CONFIGS[m_id_2] = _DEFAULT_4BIT_WQ_CONFIGS[m_id_1]
 
 
+_DEFAULT_1BIT_WQ_CONFIG = {
+    "bits": 1,
+    "ratio": 1.0,
+    "sym": True,  # only sym is supported
+    "group_size": 64,
+    "all_layers": None,
+    "group_size_fallback": "ignore",
+}
+
+
 _DEFAULT_2BIT_WQ_CONFIG = {
     "bits": 2,
     "ratio": 1.0,
@@ -1090,8 +1100,11 @@ class OVWeightQuantizationConfig(OVQuantizationConfigBase):
             Indicates whether to apply a scale estimation algorithm that minimizes the L2 error between the original and
             compressed layers. Providing a dataset is required to run scale estimation.
         dtype (`str`, *optional*):
-            Data type weights are compressed to. Possible values: ['int2', 'int3', 'int4', 'int8', 'mxfp4', 'nf4', 'cb4'].
-            Option 'cb4' represents a codebook with 16 fixed fp8 values in E4M3 format.
+            Data type weights are compressed to. Possible values: ['int1', 'int2', 'int3', 'int4', 'int8', 'mxfp4',
+            'nf4', 'cb4'].
+            Option 'cb4' represents a codebook with 16 fixed fp8 values in E4M3 format. Option 'int1' is a sign
+            format: each weight is -s or +s, stored as a u1 code with a scalar zero point of 0.5 and twice the
+            group scale `s = mean|w|`; a group whose weights are {-s, +s} is represented exactly.
         narrow_range (`bool`, *optional*):
             Use the narrow symmetric range for the integer weight formats: the codes are `+-(2^(b-1)-1)` and the
             scale is `max|w|/(2^(b-1)-1)`, so a group whose weights are `{+/-s}` or `{-s, 0, +s}` is represented
@@ -1244,8 +1257,8 @@ class OVWeightQuantizationConfig(OVQuantizationConfigBase):
                 "quantization algorithm is selected and compression ratio is 1.0."
             )
 
-        if self.dtype in ["int2", "int3", "int4", "int8"]:
-            bits = {"int2": 2, "int3": 3, "int4": 4, "int8": 8}[self.dtype]
+        if self.dtype in ["int1", "int2", "int3", "int4", "int8"]:
+            bits = {"int1": 1, "int2": 2, "int3": 3, "int4": 4, "int8": 8}[self.dtype]
 
             if self.bits is not None and self.bits != bits:
                 logger.warning(
@@ -1253,8 +1266,8 @@ class OVWeightQuantizationConfig(OVQuantizationConfigBase):
                 )
             self.bits = bits
 
-        if self.bits not in [2, 3, 4, 8]:
-            raise ValueError(f"Only support quantization to [2,3,4,8] bits but found {self.bits}")
+        if self.bits not in [1, 2, 3, 4, 8]:
+            raise ValueError(f"Only support quantization to [1,2,3,4,8] bits but found {self.bits}")
 
         if self.bits == 8 and self.dtype:
             if self.ratio != 1:
@@ -1303,13 +1316,26 @@ class OVWeightQuantizationConfig(OVQuantizationConfigBase):
             raise ValueError(f"Processor is expected to be a string, but found {self.processor}")
 
         if self.dtype is None:
-            self.dtype = {2: "int2", 3: "int3", 4: "int4", 8: "int8"}[self.bits]
+            self.dtype = {1: "int1", 2: "int2", 3: "int3", 4: "int4", 8: "int8"}[self.bits]
 
-        if self.dtype not in ["int2", "int3", "int4", "int8", "mxfp4", "nf4", "cb4"]:
+        if self.dtype not in ["int1", "int2", "int3", "int4", "int8", "mxfp4", "nf4", "cb4"]:
             raise ValueError(
                 "Weights quantization data type must be one of the following: "
-                f"['int2', 'int3', 'int4', 'int8', 'mxfp4', 'nf4', 'cb4'], but found: {self.dtype}."
+                f"['int1', 'int2', 'int3', 'int4', 'int8', 'mxfp4', 'nf4', 'cb4'], but found: {self.dtype}."
             )
+        if self.dtype == "int1":
+            # The sign grid is symmetric by construction and its scale comes from the weights.
+            self.sym = True
+            if self.quant_method == OVQuantizationMethod.AWQ:
+                raise ValueError("The AWQ algorithm is not supported for the 'int1' weight format")
+            if self.scale_estimation:
+                raise ValueError("The Scale Estimation algorithm is not supported for the 'int1' weight format")
+            if self.gptq:
+                raise ValueError("The GPTQ algorithm is not supported for the 'int1' weight format")
+            if self.lora_correction:
+                raise ValueError("The LoRA Correction algorithm is not supported for the 'int1' weight format")
+            if self.dataset is not None:
+                raise ValueError("The 'int1' weight format is data-free and does not support a dataset")
         if self.dtype in ["mxfp4", "nf4", "cb4"]:
             if self.bits != 4:
                 raise ValueError(
@@ -1346,7 +1372,7 @@ class OVWeightQuantizationConfig(OVQuantizationConfigBase):
         Returns a dictionary with the variables that are ready to use for nncf.quantize() call.
         """
 
-        signed_bitness = {2: "int2", 3: "int3", 4: "int4", 8: "int8"}
+        signed_bitness = {1: "int1", 2: "int2", 3: "int3", 4: "int4", 8: "int8"}
         mode = self.dtype if self.dtype else signed_bitness[self.bits]
         if mode in signed_bitness.values():
             mode += "_sym" if self.sym else "_asym"

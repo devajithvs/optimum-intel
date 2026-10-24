@@ -1261,6 +1261,38 @@ class OVCLIExportTestCase(unittest.TestCase):
                         f"Expected text:\n{reference_input_text_gen_prompt}\nSimplified text:\n{simplified_input_text_gen_prompt}",
                     )
 
+    def test_exporters_cli_int1(self):
+        # The sign format is data-free and covers every MatMul weight; embeddings and the last MatMul stay in
+        # INT8 unless --all-layers is set.
+        expected = {
+            "model": {
+                "int1": 72,
+                "int8": 4 if is_transformers_version("<", "5") or is_transformers_version(">=", "5.5") else 6,
+            }
+        }
+        with TemporaryDirectory() as tmpdir:
+            subprocess.run(
+                f"optimum-cli export openvino --model {MODEL_NAMES['opt125m']} --task text-generation-with-past "
+                f"--weight-format int1 {tmpdir}",
+                shell=True,
+                check=True,
+                capture_output=True,
+            )
+            model = OVModelForCausalLM.from_pretrained(tmpdir)
+            check_compression_state_per_model(self, model.ov_models, expected, check_kv_cache_precision=True)
+
+            # The one-flag path uses `_DEFAULT_1BIT_WQ_CONFIG`, whose group size is 64: every sign weight is
+            # stored as [rows, groups, 64] with one scale per group.
+            constants = {
+                op.get_friendly_name(): op for op in model.model.get_ops() if op.get_type_name() == "Constant"
+            }
+            int1_weights = [name for name, const in constants.items() if const.get_element_type().get_bitwidth() == 1]
+            self.assertTrue(int1_weights)
+            for name in int1_weights:
+                shape = list(constants[name].get_shape())
+                self.assertEqual(shape[-1], 64, name)
+                self.assertEqual(list(constants[f"{name}/scale"].get_shape()), shape[:-1] + [1], name)
+
     def test_exporters_cli_narrow_range(self):
         # INT2's narrow grid divides the group maximum by 1 instead of 2, so every 2-bit scale of the
         # `--narrow-range` export is exactly twice the scale of the plain one on the same weights: the flag

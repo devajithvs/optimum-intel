@@ -67,10 +67,11 @@ def parse_args_openvino(parser: "ArgumentParser"):
     optional_group.add_argument(
         "--weight-format",
         type=str,
-        choices=["fp32", "fp16", "int8", "int4", "mxfp4", "nf4", "cb4", "int3", "int2"],
+        choices=["fp32", "fp16", "int8", "int4", "mxfp4", "nf4", "cb4", "int3", "int2", "int1"],
         default=None,
         help=(
-            "The weight format of the exported model. Option 'cb4' represents a codebook with 16 fixed fp8 values in E4M3 format."
+            "The weight format of the exported model. Option 'cb4' represents a codebook with 16 fixed fp8 values in E4M3 format. "
+            "Option 'int1' uses a u1 sign grid: groups with weights {-s, +s} are exact, with s = mean|w|."
         ),
     )
     optional_group.add_argument(
@@ -354,6 +355,7 @@ class OVExportCommand(BaseOptimumCLICommand):
     def run(self):
         from ...exporters.openvino.__main__ import _main_quantize, _merge_move, main_export
         from ...intel.openvino.configuration import (
+            _DEFAULT_1BIT_WQ_CONFIG,
             _DEFAULT_2BIT_WQ_CONFIG,
             _DEFAULT_3BIT_WQ_CONFIG,
             _DEFAULT_4BIT_WQ_CONFIG,
@@ -417,6 +419,7 @@ class OVExportCommand(BaseOptimumCLICommand):
                 quantization_config = prepare_wc_config(self.args, _DEFAULT_4BIT_WQ_CONFIG)
 
                 if no_compression_parameter_provided(self.args) and self.args.weight_format in [
+                    "int1",
                     "int2",
                     "int3",
                     "int4",
@@ -429,8 +432,9 @@ class OVExportCommand(BaseOptimumCLICommand):
                         logger.info(
                             f"Applying the default quantization config for {self.args.model}: {quantization_config}."
                         )
-                    elif self.args.weight_format in ["int2", "int3", "int4"]:
+                    elif self.args.weight_format in ["int1", "int2", "int3", "int4"]:
                         quantization_config = {
+                            "int1": _DEFAULT_1BIT_WQ_CONFIG,
                             "int2": _DEFAULT_2BIT_WQ_CONFIG,
                             "int3": _DEFAULT_3BIT_WQ_CONFIG,
                             "int4": _DEFAULT_4BIT_WQ_CONFIG,
@@ -541,6 +545,7 @@ def prepare_wc_config(args, default_configs):
     is_int2_or_int3 = args.weight_format == "int2" or args.weight_format == "int3"
 
     weight_format_to_bits = {
+        "int1": 1,
         "int2": 2,
         "int3": 3,
         "int4": 4,

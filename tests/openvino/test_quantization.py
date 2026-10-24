@@ -73,12 +73,14 @@ from optimum.intel import (
 from optimum.intel.openvino.configuration import (
     OVQuantizationMethod,
     OVQuantizationConfigBase,
+    _DEFAULT_1BIT_WQ_CONFIG,
     _DEFAULT_4BIT_WQ_CONFIGS,
     _DEFAULT_4BIT_WQ_CONFIG,
     _DEFAULT_8BIT_WQ_CONFIGS,
     _quantization_config_from_dict,
     _GPTOSSQuantizationConfig,
 )
+from optimum.intel.openvino.modeling_base import OVBaseModel
 from optimum.intel.openvino.modeling_visual_language import _OVNanoLlavaForCausalLM
 from optimum.intel.openvino.utils import TemporaryDirectory
 from copy import deepcopy
@@ -2249,6 +2251,7 @@ class OVQuantizationConfigTest(unittest.TestCase):
         ),
         (OVWeightQuantizationConfig(bits=4, dataset=["hello world", "i'm alive"]),),
         (OVWeightQuantizationConfig(bits=2, sym=True, narrow_range=True),),
+        (OVWeightQuantizationConfig(dtype="int1", group_size=128),),
         (
             OVQuantizationConfig(
                 ignored_scope={"names": ["op_name"]},
@@ -2305,6 +2308,7 @@ class OVQuantizationConfigTest(unittest.TestCase):
     QUANTIZATION_CONFIG_DICTS = (
         (dict(bits=8, sym=True), OVWeightQuantizationConfig, None),
         (dict(bits=2, sym=True, narrow_range=True), OVWeightQuantizationConfig, None),
+        (dict(dtype="int1", group_size=128), OVWeightQuantizationConfig, None),
         (
             dict(
                 dataset="wikitext2",
@@ -2526,6 +2530,35 @@ class OVQuantizationConfigTest(unittest.TestCase):
             with pytest.raises(ValueError) as exc_info:
                 OVWeightQuantizationConfig(narrow_range=True, **{"bits": 2, "sym": True} | kwargs)
             self.assertIn("`narrow_range` applies to the symmetric integer weight formats", str(exc_info.value))
+
+    def test_sign_weight_format(self):
+        config = OVWeightQuantizationConfig(dtype="int1", group_size=128, all_layers=True)
+        nncf_dict = config.to_nncf_dict()
+        self.assertEqual(config.bits, 1)
+        self.assertTrue(config.sym)
+        self.assertEqual(nncf_dict["mode"], nncf.CompressWeightsMode.INT1_SYM)
+
+        bits_only = OVWeightQuantizationConfig(bits=1)
+        self.assertEqual(bits_only.dtype, "int1")
+        self.assertTrue(bits_only.sym)
+        self.assertEqual(bits_only.to_nncf_dict()["mode"], nncf.CompressWeightsMode.INT1_SYM)
+
+    def test_sign_weight_format_rejections(self):
+        for kwargs, message in (
+            ({"quant_method": OVQuantizationMethod.AWQ}, "The AWQ algorithm is not supported for the 'int1'"),
+            ({"scale_estimation": True}, "The Scale Estimation algorithm is not supported for the 'int1'"),
+            ({"gptq": True}, "The GPTQ algorithm is not supported for the 'int1'"),
+            ({"lora_correction": True}, "The LoRA Correction algorithm is not supported for the 'int1'"),
+            ({"dataset": "wikitext2"}, "The 'int1' weight format is data-free"),
+            ({"narrow_range": True}, "`narrow_range` applies to the symmetric integer weight formats"),
+        ):
+            with pytest.raises(ValueError) as exc_info:
+                OVWeightQuantizationConfig(dtype="int1", **kwargs)
+            self.assertIn(message, str(exc_info.value))
+
+    def test_resolve_default_1bit_quantization_config(self):
+        config = OVBaseModel._resolve_default_quantization_config("facebook/opt-125m", {"bits": 1})
+        self.assertEqual(config, _DEFAULT_1BIT_WQ_CONFIG)
 
     def test_for_no_short_id_duplicates(self):
         short_ids = set()
