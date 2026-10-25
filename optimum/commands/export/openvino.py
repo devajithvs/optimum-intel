@@ -156,6 +156,16 @@ def parse_args_openvino(parser: "ArgumentParser"):
         ),
     )
     optional_group.add_argument(
+        "--narrow-range",
+        action="store_true",
+        default=None,
+        help=(
+            "Use the narrow symmetric range for the integer weight formats: codes +-(2^(b-1)-1) and scale "
+            "max|w|/(2^(b-1)-1), so a group whose weights are {+-s} or {-s, 0, +s} is represented exactly. "
+            "Applicable to --weight-format int2/int3/int4/int8 with --sym only; the default full range clips +s."
+        ),
+    )
+    optional_group.add_argument(
         "--backup-precision",
         type=str,
         choices=["none", "int8_sym", "int8_asym"],
@@ -371,7 +381,11 @@ class OVExportCommand(BaseOptimumCLICommand):
 
         if self.args.weight_format is None and self.args.quant_mode is None:
             ov_config = None
-            if not no_compression_parameter_provided(self.args) or self.args.quantization_statistics_path is not None:
+            if (
+                not no_compression_parameter_provided(self.args)
+                or self.args.narrow_range
+                or self.args.quantization_statistics_path is not None
+            ):
                 raise ValueError(
                     "Some compression parameters are provided, but the weight format is not specified. "
                     "Please provide it with --weight-format argument."
@@ -389,6 +403,11 @@ class OVExportCommand(BaseOptimumCLICommand):
             if self.args.weight_format is not None and self.args.quant_mode is not None:
                 raise ValueError(
                     "Both --weight-format and --quant-mode arguments are provided. Please provide only one of them."
+                )
+            if self.args.quant_mode is not None and self.args.narrow_range:
+                raise ValueError(
+                    "The --narrow-range argument applies to the weight-only formats and cannot be combined with "
+                    "--quant-mode. Please use --weight-format instead."
                 )
 
             default_quantization_config = get_default_quantization_config(
@@ -420,6 +439,8 @@ class OVExportCommand(BaseOptimumCLICommand):
                         logger.info(f"Applying a default quantization config: {quantization_config}.")
                     if self.args.quantization_statistics_path is not None:
                         quantization_config["statistics_path"] = self.args.quantization_statistics_path
+                if self.args.narrow_range:
+                    quantization_config["narrow_range"] = self.args.narrow_range
             else:
                 if no_quantization_parameter_provided(self.args) and default_quantization_config is not None:
                     quantization_config = default_quantization_config

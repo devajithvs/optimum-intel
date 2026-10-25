@@ -2248,6 +2248,7 @@ class OVQuantizationConfigTest(unittest.TestCase):
             ),
         ),
         (OVWeightQuantizationConfig(bits=4, dataset=["hello world", "i'm alive"]),),
+        (OVWeightQuantizationConfig(bits=2, sym=True, narrow_range=True),),
         (
             OVQuantizationConfig(
                 ignored_scope={"names": ["op_name"]},
@@ -2303,6 +2304,7 @@ class OVQuantizationConfigTest(unittest.TestCase):
 
     QUANTIZATION_CONFIG_DICTS = (
         (dict(bits=8, sym=True), OVWeightQuantizationConfig, None),
+        (dict(bits=2, sym=True, narrow_range=True), OVWeightQuantizationConfig, None),
         (
             dict(
                 dataset="wikitext2",
@@ -2510,6 +2512,20 @@ class OVQuantizationConfigTest(unittest.TestCase):
         custom_configuration = self.DEFAULT_CONFIGURATIONS[config_id]
         prepared_config = _quantization_config_from_dict(custom_configuration)
         self.compare_config_dict_to_config_object(custom_configuration, prepared_config)
+
+    def test_narrow_range_reaches_nncf_advanced_parameters(self):
+        narrow = OVWeightQuantizationConfig(bits=2, sym=True, group_size=128, ratio=1.0, narrow_range=True)
+        nncf_dict = narrow.to_nncf_dict()
+        self.assertEqual(nncf_dict["mode"], nncf.CompressWeightsMode.INT2_SYM)
+        self.assertTrue(nncf_dict["advanced_parameters"].narrow_range)
+
+        default = OVWeightQuantizationConfig(bits=2, sym=True, group_size=128, ratio=1.0).to_nncf_dict()
+        self.assertNotIn("advanced_parameters", default)
+
+        for kwargs in ({"sym": False}, {"dtype": "nf4", "bits": 4}):
+            with pytest.raises(ValueError) as exc_info:
+                OVWeightQuantizationConfig(narrow_range=True, **{"bits": 2, "sym": True} | kwargs)
+            self.assertIn("`narrow_range` applies to the symmetric integer weight formats", str(exc_info.value))
 
     def test_for_no_short_id_duplicates(self):
         short_ids = set()
